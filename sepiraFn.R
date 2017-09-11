@@ -189,7 +189,7 @@ sepiraInfNet <- function(data.m,tissue.v,toi,cft=NULL,regEID.v,sdth=0.25,sigth=N
 
    ### now compare toi to other tissues (in order to avoid confounding by immune or stromal cell infiltrates)
    if(!is.null(cft)){
-    ti <- 1;
+    ti <- 2;
     for(t in cft){
      sel.idx <- which(tissue.v %in% c(toi,t));
      tmp.v <- tissue.v[sel.idx];
