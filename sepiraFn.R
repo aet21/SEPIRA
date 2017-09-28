@@ -229,7 +229,7 @@ sepiraInfNet <- function(data.m,tissue.v,toi,cft=NULL,regEID.v,sdth=0.25,sigth=N
     distNet.m[c,2:3] <- c(length(act.idx),length(inact.idx));
    }
 
-   return(list(netTOI=netTOI.m,sumnet=distNet,top=topTOI.lm));
+   return(list(netTOI=netTOI.m,sumnet=distNet.m,top=topTOI.lm));
 }  ### end of function sepiraInfNet
 
 ### MAIN SEPIRA function: sepiraRegAct
@@ -243,7 +243,7 @@ sepiraInfNet <- function(data.m,tissue.v,toi,cft=NULL,regEID.v,sdth=0.25,sigth=N
 ### OUTPUT:
 ### actTF: a vector or matrix of estimated TF-activity levels. If a matrix, rows label the regulators/TFs, columns the samples.
 
-sepiraRegAct <- function(data,type=c("mRNA","DNAm"),regnet.m,norm=c("c","z")){
+sepiraRegAct <- function(data,type=c("mRNA","DNAm"),regnet.m,norm=c("c","z"),ncores=4){
 
  if(type=="DNAm"){
     regnet.m <- -regnet.m;
