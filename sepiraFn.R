@@ -1,7 +1,7 @@
 ### sepiraFn.R
 ### Description: This file contains two R functions which together implement the SEPIRA (Systens EPigenomics Inference of Regulatory Activity) algorithm.
 ### Author: Andrew E Teschendorff (a.teschendorff@ucl.ac.uk)
-### Date: 21 July 2017
+### Date: 27 Sep 2017
 ### This software is released under a GPL2 licence
 
 ### required libraries
@@ -69,6 +69,20 @@ ComputePCOR <- function(idx,mapTG.idx,mapTF.idx,selbinNET.m,exp.m){
     return(pcor.m);
 } ## end of ComputePCOR function
 
+genNetTopE <- function(z.m,topE){
+
+    z.v <- as.vector(abs(z.m));
+    tmp.s <- sort(z.v,decreasing=TRUE,index.return=TRUE);
+    out.v <- rep(0,length(z.v));
+    out.v[tmp.s$ix[1:topE]] <- 1;
+    out.m <- matrix(out.v,nrow=nrow(z.m));
+    rownames(out.m) <- rownames(z.m);
+    colnames(out.m) <- colnames(z.m);
+    return(out.m);
+
+}
+
+
 InferTFact <- function(exp.v,regnet.m){
   act.v <- apply(regnet.m,2,function(tmp.v){lm.o <- lm(exp.v ~ tmp.v); act <- summary(lm.o)$coeff[2,3];return(act);})
   return(act.v);
@@ -120,15 +134,20 @@ sepiraInfNet <- function(data.m,tissue.v,toi,cft=NULL,regEID.v,sdth=0.25,sigth=N
    ### compute correlations and estimate P-values
    corNET.m <- cor(t(exp.m[mapTGTS.idx,]),t(exp.m[mapTF.idx,]));
    zNET.m <- 0.5*log( (1+corNET.m)/(1-corNET.m) );
-   stdev <- 1/sqrt(length(tt.v)-3); ### this is not the number of independent samples but the number of independent tissues. the latter is used because of the strong dependence between samples from the same tissue, but also because it leads to a more stringent significance threshold
+   stdev <- 1/sqrt(ncol(exp.m)-3); 
    pvNET.m <- 2*pnorm(abs(zNET.m),0,stdev,lower.tail=FALSE)
    ### for each gene, now identify the TFs which are correlated univariately- for these then run multivariate regression
    if(is.null(sigth)){
-    sigth <- 0.05/prod(dim(pvNET.m));
+    sigth <- 0.05/prod(dim(pvNET.m)); ### Bonferroni
    }
    binNET.m <- pvNET.m;
    binNET.m[pvNET.m < sigth] <- 1;
    binNET.m[pvNET.m >= sigth] <- 0;
+   if(sum(binNET.m) > 0.01*prod(dim(pvNET.m))){### if more than 1% cap at 1%
+       topE <- floor(0.01*prod(dim(pvNET.m)));
+       binNET.m <- genNetTopE(zNET.m,topE);
+   }
+    
    ### number of targets per tf
    ntgTF.v <- apply(binNET.m,2,sum)
    ### number of regulators per gene
@@ -239,29 +258,42 @@ sepiraInfNet <- function(data.m,tissue.v,toi,cft=NULL,regEID.v,sdth=0.25,sigth=N
 ### type: type of data, expression or DNAm
 ### regnet.m: the regulatory network to be used, i.e. the netTOI output argument of sepiraInfNet
 ### norm: further normalization of the data (if a matrix). Option "c" will center each gene to mean zero. Option "z" will z-score normalise each gene. Beware of genes with zero variance in data which should be removed if present.
+### sdth: a threshold on the standard deviation of gene expression to use if normalizing using z-scores. Should only be used on gene expression data.
 
 ### OUTPUT:
 ### actTF: a vector or matrix of estimated TF-activity levels. If a matrix, rows label the regulators/TFs, columns the samples.
 
-sepiraRegAct <- function(data,type=c("mRNA","DNAm"),regnet.m,norm=c("c","z"),ncores=4){
+sepiraRegAct <- function(data,type=c("mRNA","DNAm"),regnet.m,norm=c("c","z"),sdth=0.25,ncores=4){
 
  if(type=="DNAm"){
     regnet.m <- -regnet.m;
  }
  if(is.vector(data)){
-   actTF <- InferTFact(data,regnet.m);
+   common.v <- intersect(names(data),rownames(regnet.m));
+   match(common.v,names(data)) -> map1.idx;
+   match(common.v,rownames(regnet.m)) -> map2.idx;   
+   actTF <- InferTFact(data[map1.idx],regnet.m[map2.idx,]);
    names(actTF) <- colnames(regnet.m);
  }
  else if (is.matrix(data)){
-  ndata <- data - rowMeans(data);
-  if(norm=="z"){
-   ndata <- (data - rowMeans(data))/apply(data,1,sd);
-  }
-  idx.l <- as.list(1:ncol(data));
-  prl.o <- mclapply(idx.l,InferTFactPRL,ndata,regnet.m,mc.cores=ncores);
-  actTF <- matrix(unlist(prl.o),nrow=ncol(regnet.m),ncol=length(prl.o),byrow=FALSE)
-  rownames(actTF) <- colnames(regnet.m);
-  colnames(actTF) <- colnames(data);
+   common.v <- intersect(rownames(data),rownames(regnet.m));
+   match(common.v,rownames(data)) -> map1.idx;
+   match(common.v,rownames(regnet.m)) -> map2.idx;        
+   ndata <- data[map1.idx,] - rowMeans(data[map1.idx,]);
+
+   if(norm=="z"){
+    sd.v <- apply(data[map1.idx,],1,sd);
+    nz.idx <- which(sd.v>0);
+    z.idx <- which(sd.v==0);
+    ndata <- data[map1.idx,];       
+    ndata[nz.idx,] <- (data[map1.idx[nz.idx],] - rowMeans(data[map1.idx[nz.idx],]))/sd.v[nz.idx];
+    ndata[z.idx,] <- 0;
+   }
+   idx.l <- as.list(1:ncol(data));
+   prl.o <- mclapply(idx.l,InferTFactPRL,ndata,regnet.m[map2.idx,],mc.cores=ncores);
+   actTF <- matrix(unlist(prl.o),nrow=ncol(regnet.m),ncol=length(prl.o),byrow=FALSE)
+   rownames(actTF) <- colnames(regnet.m);
+   colnames(actTF) <- colnames(data);
  }
 
  return(actTF);
